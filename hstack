@@ -1,0 +1,122 @@
+#!/bin/bash
+#: hstack
+#: Copyright (c) 2024 DankoScientific
+clear #: clean slate, bayyybeeeeeee!
+keep_it_goin() { # this is being used as a debugging pause
+  echo ""
+  read -e -p "Y to continue / N to try again " -n 2 -r
+  echo ""
+  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    exec "$0"
+  fi
+}
+
+final_destination="/PATH/TO/SAVE/FILE/"
+left=$1
+right=$2
+get_four=$(printf "%s\n" "$left" "$right")
+
+time_compare() {
+    shortest_duration=999999.999999
+    for i in $get_four; do
+        duration=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 $i | cut -d '.' -f 1,2)
+        echo "$i" | sed 's/^/-i /'
+        if [ $(echo "$duration < $shortest_duration" | bc -l) -eq 1 ]; then
+            shortest_duration="$duration"
+        fi
+    done
+    #echo "$shortest_duration"
+}
+get_fnames() {
+    time_compare
+    echo $shortest_duration
+}
+get_bitrate() {
+    bit_vid=$(find . -type f -iname 'out*.mp4' -printf %"f\n" | head -n 1)
+    audio_bitrate=$(ffprobe -v error -show_entries format=bit_rate -of default=nw=1:nk=1 -i "$bit_vid")
+    echo "$audio_bitrate"
+}
+show_menu() {
+    echo -n "## NAME: "
+    IFS= read -r scene_name
+    echo ""
+}
+end_of_file=$(date +%s | cut -b 7-10) # adds 4 numbers to the end of file based on date in seconds
+use_four=$(get_fnames) # used to run time_compare
+use_four1=$(echo "$use_four" | head -n 2) # this removes shortest_duration out for the FFMPEG part below
+use_fade=$(echo "$use_four" | cut -d " " -f1 | tail -n 1) # takes shortest_duration and then uses to subtract 1 below to fade out
+use_bit=$(get_bitrate) # get audio bitrate
+
+echo "+------+------+"
+echo "|      |      |"
+echo "+   h-stack   +"
+echo "|      |      |"
+echo "+------+------+"
+echo ""
+echo "These files: "
+echo "$use_four"
+
+keep_it_goin
+show_menu
+
+err="-v 16 -stats -hwaccel vdpau"
+border_left="fillborders=right=2:mode=fixed:color=#000000@0.25"
+border_right="fillborders=left=2:mode=fixed:color=#000000@0.25"
+font_loc="fontfile=/PATH/TO/FONT/FILE:fix_bounds=true"
+font_opt="fontsize=h/38:fontcolor=white:x=3:y=(h-th-2):borderw=1:bordercolor=#0091FF@0.5:enable='between(t,0,5)'" #: bottom left for 5 sec
+text_opt="text='Your Text Here!'"
+text_draw="drawtext=$font_loc:$font_opt:$text_opt"
+crop_middle="crop=iw/2:ih:'(iw-ow)/2':0"
+stack="hstack=inputs=2:shortest=1"
+vcodec="-c:v libx264 -crf 21 -preset fast -tune film -pix_fmt yuv420p -movflags +faststart"
+acodec="-c:a aac -b:a $use_bit"
+sardar="setsar=w/h,setdar=w/h"
+fade_duration="$(echo "$use_fade - 1" | bc -l)"
+fadeout="fade=out:st=$fade_duration:d=1"
+audio_all="amerge=inputs=2,afade=t=out:st=$fade_duration:d=1"
+final_name="splitscreen-$scene_name-$end_of_file.mp4"
+
+use_ffmpeg() {
+  ffmpeg $err \
+    $use_four1 \
+    -filter_complex " \
+        [0:v]$crop_middle,$border_left[left]; \
+        [1:v]$crop_middle,$border_right[right]; \
+        [left][right]$stack,$sardar,$text_draw,$fadeout[out]; \
+        [0:a][1:a]$audio_all[a]" \
+            -map "[out]" -map "[a]" $vcodec $acodec $final_name
+}
+
+play_file() {
+    read -e -p "Play $final_name? Y/n " -n 3 -r
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        play $final_name 0 1
+        play_file
+    else
+        move_file
+        return
+    fi
+}
+delete_file() {
+    read -e -p "Delete files? Y/n " -n 3 -r
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        rm $use_four1
+        return
+    else
+        move_file
+        return
+    fi
+}
+move_file() {
+    read -e -p "Move to $final_destination Y/n " -n 3 -r
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        rsync --remove-source-files --info=progress2 $final_name $final_destination/$final_name
+        delete_file
+    else
+        play_file
+        return
+    fi
+}
+
+use_ffmpeg
+play_file
