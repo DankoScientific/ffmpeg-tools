@@ -1,0 +1,38 @@
+#!/bin/bash
+keep_it_goin() {
+  echo ""
+  read -e -p "Continue y/n " -n 2 -r
+  echo ""
+  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    exit 1
+  fi
+}
+
+if [ ! -d /tmp/seg/ ]; then
+  mkdir /tmp/seg
+else
+  echo ""
+  echo "the directory seg already exists in tmp"
+  echo ""
+fi
+video_length=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 -sexagesimal -i $1 | cut -b 1-11)
+vid_len=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 -i $1)
+vid_framerate=$(ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate -of default=noprint_wrappers=1:nokey=1 $1)
+vid_framerate=$(echo "scale=2; $vid_framerate" | bc) # evaluates framerate as fraction from prev variable, bc handles fractions proper
+video_extension=$(ffprobe -v error -show_entries format=filename -of default=nw=1:nk=1 -i "$1" | rev | cut -d "." -f 1 | rev)
+
+echo "8< -- segment -- >8"
+echo "Vid Length (HH:MM:SS): $video_length"
+echo "Vid length (SS) : $vid_len"
+echo "Vid FPS: $vid_framerate"
+
+keep_it_goin
+
+echo -n "START TIME: "
+IFS= read -r scene_start
+echo -n "DURATION (in seconds): "
+IFS= read -r scene_duration
+
+ffmpeg -v 24 -stats -ss $scene_start -i $1 -c copy -map 0 -f \
+  segment -segment_format mp4 -segment_time $scene_duration -segment_time_delta 0 -reset_timestamps 1 \
+  -segment_format_options movflags=+faststart /tmp/seg/out%04d.$video_extension
