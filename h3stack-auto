@@ -37,7 +37,7 @@ use_fade=$(echo "$use_four" | cut -d " " -f1 | tail -n 1) # takes shortest_durat
 use_bit=$(get_bitrate) # get audio bitrate 
 
 echo "|-------------- hstack-auto -----------------|" # this is for pretty, can be deleted if you like.
-echo "| Gets 3 videos and splits them in thirds    |"
+echo "| Gets 3 videos and joins them               |"
 echo "| CTRL + C to end it all                     |"
 echo "|--------------------------------------------|"
 echo ""
