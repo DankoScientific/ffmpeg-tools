@@ -1,0 +1,149 @@
+#!/bin/bash
+#: xstack
+#: Copyright (c) 2024 DankoScientific
+clear #: Clean slate, bayyybeeeeeeeeeeeeeeeee
+any_key() {
+  echo "Any key to continue (CTRL + C to cancel)"
+  read -n 1 -s
+  echo ""
+}
+
+show_menu() {
+    echo -n "## NAME: "
+    IFS= read -r scene_name
+
+    echo -n "## SCALE: "
+    IFS= read -r scene_scale
+
+    echo -n "## CROP: "
+    IFS= read -r scene_crop
+
+    echo ""
+}
+
+final_destination="/YOUR/PATH/HERE/"
+topleft=$1
+topright=$2
+bottomleft=$3
+bottomright=$4
+get_four=$(printf "%s\n" "$topleft" "$topright" "$bottomleft" "$bottomright")
+
+time_compare() {
+    shortest_duration=999999.999999
+    for i in $get_four; do
+        duration=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 $i | cut -d '.' -f 1,2) # removes milliseconds
+        echo "$i" | sed 's/^/-i /' # adds -i before each file for the FFMPEG part below
+        if [ $(echo "$duration < $shortest_duration" | bc -l) -eq 1 ]; then
+            shortest_duration="$duration"
+        fi
+    done
+}
+
+get_fnames() {
+    time_compare
+    echo $shortest_duration
+}
+
+get_bitrate() {
+    bit_vid=$(find . -type f -iname 'out*.mp4' -printf %"f\n" | head -n 1)
+    audio_bitrate=$(ffprobe -v error -show_entries format=bit_rate -of default=nw=1:nk=1 -i "$bit_vid")
+    echo "$audio_bitrate"
+}
+
+end_of_file=$(date +%s | cut -b 7-10) #: revolutionary file naming system
+use_four=$(get_fnames) # used to run time_compare
+use_four1=$(echo "$use_four" | head -n 4) # this removes shortest_duration out for the FFMPEG part below
+use_fade=$(echo "$use_four" | cut -d " " -f1 | tail -n 1) # takes shortest_duration and then uses to subtract 1 below to fade out
+use_bit=$(get_bitrate) # get audio bitrate 
+
+xstack_picker() {
+  echo "+------+------+"
+  echo "|      |      |"
+  echo "+---x-stack---+"
+  echo "|      |      |"
+  echo "+------+------+"
+  echo ""
+  echo "The lucky chosen: "
+  echo "$use_four"
+  echo ""
+}
+
+xstack_picker
+
+any_key
+
+show_menu
+
+if [ "$scene_crop" = "qhd" ]; then
+    crop_filter="960:540:'(iw-ow)/2':0" #: center top video 960x540
+elif [ "$scene_crop" = "" ]; then
+    crop_filter="iw:ih"
+else
+    crop_filter="$scene_crop"
+fi
+
+#: FFMPEG Variables
+err="-v 16 -stats -hwaccel vdpau"
+scaler="scale=iw/$scene_scale:ih/$scene_scale"
+cropper="crop=$crop_filter"
+border_tl="fillborders=right=1:bottom=1:mode=fixed:color=black"
+border_tr="fillborders=left=1:bottom=1:mode=fixed:color=black"
+border_bl="fillborders=right=1:top=1:mode=fixed:color=black"
+border_br="fillborders=left=1:top=1:mode=fixed:color=black"
+make_stack="xstack=inputs=4:layout=0_0|w0_0|0_h0|w0_h0|:shortest=1"
+sardar="setsar=w/h,setdar=w/h"
+font_loc="fontfile=/PATH/TO/FONT/FILE:fix_bounds=true"
+font_opt="fontsize=h/36:x=3:y=(h-th-2):fontcolor_expr=FFFFFF%{eif\\\\: clip(255*(1*between(t\\, 0.0 + 1.0\\, 5.0 - 1.0) + ((t - 0.0)/1.0)*between(t\\, 0.0\\, 0.0 + 1.0) + (-(t - 5.0)/1.0)*between(t\\, 5.0 - 1.0\\, 5.0) )\\, 0\\, 255) \\\\: x\\\\: 2 }"
+text_opt="text='Your text here!'"
+text_draw="drawtext=$font_loc:$font_opt:$text_opt" 
+fade_duration="$(echo "$use_fade - 1" | bc -l)"
+fadeout="fade=out:st=$fade_duration:d=1"
+audio_join="amerge=inputs=4,afade=t=out:st=$fade_duration:d=1" 
+vcodec="-c:v libx264 -crf 21 -preset faster -tune film -pix_fmt yuv420p -movflags +faststart"
+final_name="xstack-$scene_name-$end_of_file.mp4"
+
+use_ffmpeg() {
+    ffmpeg $err \
+        $use_four1 \
+        -filter_complex " \
+          [0:v]$scaler,$cropper,$border_tl[v1]; \
+          [1:v]$scaler,$cropper,$border_tr[v2]; \
+          [2:v]$scaler,$cropper,$border_bl[v3]; \
+          [3:v]$scaler,$cropper,$border_br[v4]; \
+          [0:a][1:a][2:a][3:a]$audio_join[a]; \
+          [v1][v2][v3][v4]$make_stack,$sardar,$text_draw,$fadeout[out]" \
+                  -map "[out]" -map "[a]" $vcodec $final_name
+}
+play_file() {
+    read -e -p "Play $final_name? Y/n " -n 3 -r
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        play $final_name 0 1
+        play_file
+    else
+        move_file
+        return
+    fi
+}
+delete_file() {
+    read -e -p "Delete files? Y/n " -n 3 -r
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        rm $use_four1
+        return
+    else
+        move_file
+        return
+    fi
+}
+move_file() {
+    read -e -p "Move to $final_destination Y/n " -n 3 -r
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        rsync --remove-source-files --info=progress2 $final_name $final_destination/$final_name
+        delete_file
+    else
+        play_file
+        return
+    fi
+}
+
+use_ffmpeg
+play_file
